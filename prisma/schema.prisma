@@ -1,0 +1,356 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+  STAFF
+}
+
+enum PickupMode {
+  DELIVERY
+  PICKUP
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  PICKED_UP
+  CANCELLED
+}
+
+enum PaymentStatus {
+  REQUIRES_PAYMENT
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum PrintJobStatus {
+  QUEUED
+  PROCESSING
+  SUCCESS
+  FAILED
+}
+
+enum AddressType {
+  HOME
+  WORK
+  OTHER
+}
+
+model User {
+  id           String           @id @default(cuid())
+  username     String           @unique
+  passwordHash String
+  fullName     String
+  email        String?
+  phone        String?
+  role         UserRole         @default(CUSTOMER)
+  locale       String           @default("fr-CH")
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  addresses    Address[]
+  sessions     Session[]
+  cart         Cart?
+  orders       Order[]
+  statusLogs   OrderStatusLog[]
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenId   String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Address {
+  id         String      @id @default(cuid())
+  userId     String
+  type       AddressType @default(HOME)
+  label      String?
+  street     String
+  postalCode String
+  city       String
+  canton     String?
+  country    String      @default("CH")
+  isDefault  Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([postalCode])
+}
+
+model DeliveryZone {
+  id             String   @id @default(cuid())
+  name           String
+  postalCodes    String[]
+  deliveryFeeChf Decimal  @db.Decimal(10, 2)
+  minOrderChf    Decimal? @db.Decimal(10, 2)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  orders         Order[]
+
+  @@index([name])
+}
+
+model PizzaCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  pizzas      Pizza[]
+}
+
+model Pizza {
+  id            String            @id @default(cuid())
+  slug          String            @unique
+  name          String
+  description   String
+  imageUrl      String
+  isAvailable   Boolean           @default(true)
+  basePriceChf  Decimal           @db.Decimal(10, 2)
+  categoryId    String
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  category      PizzaCategory     @relation(fields: [categoryId], references: [id])
+  sizes         PizzaSizeOption[]
+  allowedExtras PizzaExtra[]
+  cartItems     CartItem[]
+  orderItems    OrderItem[]
+
+  @@index([categoryId])
+  @@index([isAvailable])
+}
+
+model PizzaSizeOption {
+  id            String     @id @default(cuid())
+  pizzaId       String
+  name          String
+  diameterCm    Int?
+  priceDeltaChf Decimal    @default(0) @db.Decimal(10, 2)
+  sortOrder     Int        @default(0)
+  isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  pizza         Pizza      @relation(fields: [pizzaId], references: [id], onDelete: Cascade)
+  cartItems     CartItem[]
+
+  @@index([pizzaId])
+}
+
+model ExtraOption {
+  id         String          @id @default(cuid())
+  name       String          @unique
+  priceChf   Decimal         @db.Decimal(10, 2)
+  isActive   Boolean         @default(true)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  pizzas     PizzaExtra[]
+  cartExtras CartItemExtra[]
+}
+
+model PizzaExtra {
+  pizzaId   String
+  extraId   String
+  createdAt DateTime    @default(now())
+  pizza     Pizza       @relation(fields: [pizzaId], references: [id], onDelete: Cascade)
+  extra     ExtraOption @relation(fields: [extraId], references: [id], onDelete: Cascade)
+
+  @@id([pizzaId, extraId])
+}
+
+model Cart {
+  id        String     @id @default(cuid())
+  userId    String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items     CartItem[]
+}
+
+model CartItem {
+  id           String           @id @default(cuid())
+  cartId       String
+  pizzaId      String
+  sizeOptionId String?
+  quantity     Int
+  unitPriceChf Decimal          @db.Decimal(10, 2)
+  notes        String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  cart         Cart             @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  pizza        Pizza            @relation(fields: [pizzaId], references: [id])
+  sizeOption   PizzaSizeOption? @relation(fields: [sizeOptionId], references: [id])
+  extras       CartItemExtra[]
+
+  @@index([cartId])
+}
+
+model CartItemExtra {
+  id            String      @id @default(cuid())
+  cartItemId    String
+  extraOptionId String
+  quantity      Int
+  unitPriceChf  Decimal     @db.Decimal(10, 2)
+  cartItem      CartItem    @relation(fields: [cartItemId], references: [id], onDelete: Cascade)
+  extraOption   ExtraOption @relation(fields: [extraOptionId], references: [id])
+
+  @@index([cartItemId])
+}
+
+model Order {
+  id                    String           @id @default(cuid())
+  orderNumber           Int              @unique @default(autoincrement())
+  userId                String
+  status                OrderStatus      @default(PENDING)
+  pickupMode            PickupMode
+  paymentStatus         PaymentStatus    @default(REQUIRES_PAYMENT)
+  currency              String           @default("CHF")
+  subtotalChf           Decimal          @db.Decimal(10, 2)
+  deliveryFeeChf        Decimal          @default(0) @db.Decimal(10, 2)
+  taxRatePercent        Decimal          @db.Decimal(5, 2)
+  taxAmountChf          Decimal          @db.Decimal(10, 2)
+  totalChf              Decimal          @db.Decimal(10, 2)
+  customerName          String
+  customerPhone         String?
+  customerEmail         String?
+  customerNotes         String?
+  deliveryStreet        String?
+  deliveryPostalCode    String?
+  deliveryCity          String?
+  deliveryCanton        String?
+  deliveryZoneId        String?
+  stripeSessionId       String?          @unique
+  stripePaymentIntentId String?          @unique
+  paidAt                DateTime?
+  preparingAt           DateTime?
+  readyAt               DateTime?
+  deliveredAt           DateTime?
+  cancelledAt           DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  user                  User             @relation(fields: [userId], references: [id])
+  deliveryZone          DeliveryZone?    @relation(fields: [deliveryZoneId], references: [id])
+  items                 OrderItem[]
+  payment               Payment?
+  statusHistory         OrderStatusLog[]
+  printJobs             PrintJob[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id                String           @id @default(cuid())
+  orderId           String
+  pizzaId           String?
+  pizzaNameSnapshot String
+  sizeNameSnapshot  String?
+  quantity          Int
+  unitPriceChf      Decimal          @db.Decimal(10, 2)
+  lineTotalChf      Decimal          @db.Decimal(10, 2)
+  notes             String?
+  createdAt         DateTime         @default(now())
+  order             Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  pizza             Pizza?           @relation(fields: [pizzaId], references: [id], onDelete: SetNull)
+  extras            OrderItemExtra[]
+
+  @@index([orderId])
+}
+
+model OrderItemExtra {
+  id           String    @id @default(cuid())
+  orderItemId  String
+  nameSnapshot String
+  quantity     Int
+  unitPriceChf Decimal   @db.Decimal(10, 2)
+  lineTotalChf Decimal   @db.Decimal(10, 2)
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([orderItemId])
+}
+
+model OrderStatusLog {
+  id              String       @id @default(cuid())
+  orderId         String
+  fromStatus      OrderStatus?
+  toStatus        OrderStatus
+  changedByUserId String?
+  note            String?
+  createdAt       DateTime     @default(now())
+  order           Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  changedBy       User?        @relation(fields: [changedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+}
+
+model Payment {
+  id                    String        @id @default(cuid())
+  orderId               String        @unique
+  stripeSessionId       String?       @unique
+  stripePaymentIntentId String?       @unique
+  amountChf             Decimal       @db.Decimal(10, 2)
+  currency              String        @default("CHF")
+  status                PaymentStatus @default(REQUIRES_PAYMENT)
+  rawProviderPayload    Json?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  order                 Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model PrintJob {
+  id            String         @id @default(cuid())
+  orderId       String
+  status        PrintJobStatus @default(QUEUED)
+  printerTarget String?
+  attempts      Int            @default(0)
+  maxAttempts   Int            @default(5)
+  nextAttemptAt DateTime       @default(now())
+  lockedAt      DateTime?
+  lastError     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  order         Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  logs          PrintLog[]
+
+  @@index([status, nextAttemptAt])
+  @@index([orderId])
+}
+
+model PrintLog {
+  id         String   @id @default(cuid())
+  printJobId String
+  level      String
+  message    String
+  payload    Json?
+  createdAt  DateTime @default(now())
+  printJob   PrintJob @relation(fields: [printJobId], references: [id], onDelete: Cascade)
+
+  @@index([printJobId, createdAt])
+}
